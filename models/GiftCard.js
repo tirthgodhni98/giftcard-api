@@ -45,6 +45,11 @@ const giftCardSchema = new mongoose.Schema({
     shopifyDomain: {
         type: String,
         required: true
+    },
+    status: {
+        type: String,
+        enum: ['active', 'disabled'],
+        default: 'active'
     }
 }, {
     timestamps: true
