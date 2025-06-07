@@ -79,7 +79,7 @@ router.post('/create-gift-card', async (req, res) => {
         const variables = {
             input: {
                 initialValue: Number(amount || 70.0),
-                note: message || 'Happy Birthday!',
+                note: message || 'Thank you for your purchase!',
             }
         };
 

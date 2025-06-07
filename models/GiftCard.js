@@ -40,7 +40,7 @@ const giftCardSchema = new mongoose.Schema({
     },
     note: {
         type: String,
-        default: 'Happy Birthday!'
+        default: 'Thank you for your purchase!'
     },
     shopifyDomain: {
         type: String,
