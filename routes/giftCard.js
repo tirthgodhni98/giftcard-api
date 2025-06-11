@@ -3,40 +3,13 @@ const router = express.Router();
 const axios = require('axios');
 const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
 const GiftCard = require('../models/GiftCard');
+const { makeShopifyRequest } = require('../utils/shopifyApi');
 
 // Debug middleware for this router
 router.use((req, res, next) => {
     console.log('GiftCard Router:', req.method, req.url);
     next();
 });
-
-// Helper function for Shopify GraphQL requests
-const makeShopifyRequest = async (query, variables) => {
-    try {
-        const response = await axios.post(
-            `https://${shopifyDomain}/admin/api/${apiVersion}/graphql.json`,
-            {
-                query,
-                variables
-            },
-            {
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-Shopify-Access-Token': accessToken,
-                }
-            }
-        );
-
-        if (response.data.errors) {
-            throw new Error(response.data.errors[0].message);
-        }
-
-        return response.data.data;
-    } catch (error) {
-        console.error('Shopify API Error:', error.response?.data || error.message);
-        throw error;
-    }
-};
 
 // Create a new gift card
 router.post('/create-gift-card', async (req, res) => {
@@ -49,6 +22,25 @@ router.post('/create-gift-card', async (req, res) => {
                 message: 'Both email and name are required'
             });
         }
+
+        // First fetch shop information
+        const shopQuery = `
+            query {
+                shop {
+                    name
+                    myshopifyDomain
+                    primaryDomain {
+                        url
+                    }
+                }
+            }
+        `;
+
+        const shopData = await makeShopifyRequest(shopQuery);
+        console.log('\nCreating Gift Card for:');
+        console.log('Store Name:', shopData.shop.name);
+        console.log('Shopify Domain:', shopData.shop.myshopifyDomain);
+        console.log('----------------------------------------');
 
         const createGiftCardMutation = `
             mutation giftCardCreate($input: GiftCardCreateInput!) {
@@ -64,7 +56,6 @@ router.post('/create-gift-card', async (req, res) => {
                         createdAt
                         maskedCode
                         note
-                        disabledAt
                     }
                     giftCardCode
                     userErrors {
@@ -80,12 +71,15 @@ router.post('/create-gift-card', async (req, res) => {
             input: {
                 initialValue: Number(amount || 70.0),
                 note: message || 'Thank you for your purchase!',
+                templateSuffix: "gift_card",
+                expiresOn: null,
+                customerId: null
             }
         };
 
         const data = await makeShopifyRequest(createGiftCardMutation, variables);
         const giftCardData = data.giftCardCreate;
-
+        
         if (giftCardData.userErrors?.length > 0) {
             return res.status(400).json({
                 error: 'Shopify Error',
@@ -101,13 +95,21 @@ router.post('/create-gift-card', async (req, res) => {
             maskedCode: giftCardData.giftCard.maskedCode,
             giftCardCode: giftCardData.giftCardCode,
             note: giftCardData.giftCard.note,
-            shopifyDomain: shopifyDomain,
+            shopifyDomain: shopData.shop.myshopifyDomain,
             email,
             name,
-            status: giftCardData.giftCard.disabledAt ? 'disabled' : 'active'
+            status: 'active'  // Set default status as active
         });
 
         const savedGiftCard = await giftCard.save();
+        
+        console.log('\nGift Card Created Successfully:');
+        console.log('Gift Card ID:', savedGiftCard.giftCardId);
+        console.log('Initial Value:', savedGiftCard.initialValue);
+        console.log('Balance:', savedGiftCard.balance);
+        console.log('Gift Card Code:', savedGiftCard.giftCardCode);
+        console.log('----------------------------------------\n');
+
         res.json({
             success: true,
             data: savedGiftCard
@@ -224,7 +226,7 @@ router.get('/lookup/:code', async (req, res) => {
                     balance {
                         amount
                     }
-                    disabledAt
+                    status
                 }
             }
         `;
@@ -233,7 +235,7 @@ router.get('/lookup/:code', async (req, res) => {
         
         // Update local balance
         giftCard.balance = parseFloat(data.giftCard.balance.amount);
-        giftCard.status = data.giftCard.disabledAt ? 'disabled' : 'active';
+        giftCard.status = data.giftCard.status === 'DISABLED' ? 'disabled' : 'active';
         await giftCard.save();
 
         res.json(giftCard);
@@ -305,73 +307,40 @@ router.post('/redeem/:giftCardId', async (req, res) => {
     }
 });
 
-// Update gift card status
-router.patch('/status/:giftCardId', async (req, res) => {
+// Disable gift card
+router.post('/disable/:giftCardId', async (req, res) => {
     try {
-        const { status } = req.body;
-        if (!['active', 'disabled'].includes(status)) {
-            return res.status(400).json({ error: 'Invalid status' });
-        }
-
         const giftCard = await GiftCard.findOne({ giftCardId: req.params.giftCardId });
         if (!giftCard) {
             return res.status(404).json({ error: 'Gift card not found' });
         }
 
-        let data;
-        if (status === 'disabled') {
-            const disableMutation = `
-                mutation giftCardDisable($id: ID!) {
-                    giftCardDisable(id: $id) {
-                        giftCard {
-                            id
-                            disabledAt
-                        }
-                        userErrors {
-                            message
-                            field
-                            code
-                        }
+        const disableMutation = `
+            mutation giftCardDisable($id: ID!) {
+                giftCardDisable(id: $id) {
+                    giftCard {
+                        id
+                        status
+                    }
+                    userErrors {
+                        message
+                        field
+                        code
                     }
                 }
-            `;
-
-            data = await makeShopifyRequest(disableMutation, { id: giftCard.giftCardId });
-            
-            if (data.giftCardDisable.userErrors?.length > 0) {
-                return res.status(400).json({
-                    error: 'Error disabling gift card',
-                    details: data.giftCardDisable.userErrors
-                });
             }
-        } else {
-            const enableMutation = `
-                mutation giftCardEnable($id: ID!) {
-                    giftCardEnable(id: $id) {
-                        giftCard {
-                            id
-                            disabledAt
-                        }
-                        userErrors {
-                            message
-                            field
-                            code
-                        }
-                    }
-                }
-            `;
+        `;
 
-            data = await makeShopifyRequest(enableMutation, { id: giftCard.giftCardId });
-            
-            if (data.giftCardEnable.userErrors?.length > 0) {
-                return res.status(400).json({
-                    error: 'Error enabling gift card',
-                    details: data.giftCardEnable.userErrors
-                });
-            }
+        const data = await makeShopifyRequest(disableMutation, { id: giftCard.giftCardId });
+        
+        if (data.giftCardDisable.userErrors?.length > 0) {
+            return res.status(400).json({
+                error: 'Error disabling gift card',
+                details: data.giftCardDisable.userErrors
+            });
         }
 
-        giftCard.status = status;
+        giftCard.status = 'disabled';
         await giftCard.save();
 
         res.json({
@@ -379,7 +348,7 @@ router.patch('/status/:giftCardId', async (req, res) => {
             data: giftCard
         });
     } catch (error) {
-        res.status(500).json({ error: 'Error updating gift card status', details: error.message });
+        res.status(500).json({ error: 'Error disabling gift card', details: error.message });
     }
 });
 
