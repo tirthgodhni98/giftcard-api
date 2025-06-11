@@ -37,10 +37,21 @@ router.post('/create-gift-card', async (req, res) => {
         `;
 
         const shopData = await makeShopifyRequest(shopQuery);
-        console.log('\nCreating Gift Card for:');
+        console.log('\n=== Gift Card Creation Details ===\n');
+        console.log('Store Information:');
+        console.log('------------------');
         console.log('Store Name:', shopData.shop.name);
         console.log('Shopify Domain:', shopData.shop.myshopifyDomain);
-        console.log('----------------------------------------');
+        console.log('Primary Domain:', shopData.shop.primaryDomain.url);
+        console.log('\nCustomer Information:');
+        console.log('------------------');
+        console.log('Name:', name);
+        console.log('Email:', email);
+        console.log('\nGift Card Details:');
+        console.log('------------------');
+        console.log('Initial Amount:', amount);
+        console.log('Message:', message || 'Thank you for your purchase!');
+        console.log('----------------------------------------\n');
 
         const createGiftCardMutation = `
             mutation giftCardCreate($input: GiftCardCreateInput!) {
@@ -104,10 +115,13 @@ router.post('/create-gift-card', async (req, res) => {
         const savedGiftCard = await giftCard.save();
         
         console.log('\nGift Card Created Successfully:');
+        console.log('------------------');
         console.log('Gift Card ID:', savedGiftCard.giftCardId);
         console.log('Initial Value:', savedGiftCard.initialValue);
         console.log('Balance:', savedGiftCard.balance);
         console.log('Gift Card Code:', savedGiftCard.giftCardCode);
+        console.log('Status:', savedGiftCard.status);
+        console.log('Created At:', savedGiftCard.createdAt.toISOString());
         console.log('----------------------------------------\n');
 
         res.json({

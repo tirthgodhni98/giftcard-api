@@ -2,6 +2,7 @@ const axios = require('axios');
 const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
 
 const makeShopifyRequest = async (query, variables) => {
+    console.log('\n=== Calling Shopify API MakeShopifyRequest ===\n');
     try {
         const response = await axios.post(
             `https://${shopifyDomain}/admin/api/${apiVersion}/graphql.json`,
