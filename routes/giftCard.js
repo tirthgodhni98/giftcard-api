@@ -2,7 +2,10 @@ const express = require('express');
 const router = express.Router();
 const GiftCard = require('../models/GiftCard');
 const axios = require('axios');
-const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
+// const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
+const shopifyDomain = 'bje-paymore-test.myshopify.com';
+const accessToken = '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';
+const apiVersion = '2025-04';
 
 const makeShopifyRequest = async (query, variables) => {
     console.log('\n=== Calling Shopify API MakeShopifyRequest ===\n');
