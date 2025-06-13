@@ -1,9 +1,36 @@
 const express = require('express');
 const router = express.Router();
+const GiftCard = require('../models/GiftCard');
 const axios = require('axios');
 const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
-const GiftCard = require('../models/GiftCard');
-const { makeShopifyRequest } = require('../utils/shopifyApi');
+
+const makeShopifyRequest = async (query, variables) => {
+    console.log('\n=== Calling Shopify API MakeShopifyRequest ===\n');
+    try {
+        const response = await axios.post(
+            `https://${shopifyDomain}/admin/api/${apiVersion}/graphql.json`,
+            {
+                query,
+                variables
+            },
+            {
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-Shopify-Access-Token': accessToken,
+                }
+            }
+        );
+
+        if (response.data.errors) {
+            throw new Error(response.data.errors[0].message);
+        }
+
+        return response.data.data;
+    } catch (error) {
+        console.error('Shopify API Error:', error.response?.data || error.message);
+        throw error;
+    }
+};
 
 // Debug middleware for this router
 router.use((req, res, next) => {
@@ -15,6 +42,8 @@ router.use((req, res, next) => {
 router.post('/create-gift-card', async (req, res) => {
     try {
         const { email, name, amount, message } = req.body;
+
+        console.log('req.body::: ', req.body);
 
         if (!email || !name) {
             return res.status(400).json({
@@ -37,12 +66,47 @@ router.post('/create-gift-card', async (req, res) => {
         `;
 
         const shopData = await makeShopifyRequest(shopQuery);
+        
+        // Get Shopify user information
+        const userQuery = `
+            query {
+                shop {
+                    name
+                    myshopifyDomain
+                    primaryDomain {
+                        url
+                    }
+                    owner {
+                        firstName
+                        lastName
+                        email
+                    }
+                }
+            }
+        `;
+        
+        let shopifyUser = null;
+        try {
+            const userData = await makeShopifyRequest(userQuery);
+            shopifyUser = userData.shop.owner;
+        } catch (error) {
+            console.log('Error fetching Shopify user:', error.message);
+        }
+
         console.log('\n=== Gift Card Creation Details ===\n');
         console.log('Store Information:');
         console.log('------------------');
         console.log('Store Name:', shopData.shop.name);
         console.log('Shopify Domain:', shopData.shop.myshopifyDomain);
         console.log('Primary Domain:', shopData.shop.primaryDomain.url);
+        
+        if (shopifyUser) {
+            console.log('\nShopify User Information:');
+            console.log('------------------');
+            console.log('Email:', shopifyUser.email);
+            console.log('Name:', `${shopifyUser.firstName} ${shopifyUser.lastName}`);
+        }
+
         console.log('\nCustomer Information:');
         console.log('------------------');
         console.log('Name:', name);
@@ -51,6 +115,64 @@ router.post('/create-gift-card', async (req, res) => {
         console.log('------------------');
         console.log('Initial Amount:', amount);
         console.log('Message:', message || 'Thank you for your purchase!');
+        console.log('\nCreated By:');
+        console.log('------------------');
+        
+        // Try to get user information from various sources
+        const userInfo = {
+            fromHeaders: {
+                email: req.headers['x-user-email'] || req.headers['X-User-Email'],
+                name: req.headers['x-user-name'] || req.headers['X-User-Name']
+            },
+            fromBody: {
+                email: req.body.email,
+                name: req.body.name
+            },
+            fromQuery: {
+                email: req.query.email,
+                name: req.query.name
+            },
+            fromCookies: {
+                email: req.cookies?.userEmail,
+                name: req.cookies?.userName
+            },
+            fromShopify: shopifyUser ? {
+                email: shopifyUser.email,
+                name: `${shopifyUser.firstName} ${shopifyUser.lastName}`
+            } : null
+        };
+
+        if (req.user) {
+            console.log('User (from auth):', req.user.email);
+            console.log('Name (from auth):', req.user.name);
+            console.log('Role (from auth):', req.user.role);
+        } else if (userInfo.fromShopify) {
+            console.log('User (from Shopify):', userInfo.fromShopify.email);
+            console.log('Name (from Shopify):', userInfo.fromShopify.name);
+        } else if (userInfo.fromHeaders.email) {
+            console.log('User (from headers):', userInfo.fromHeaders.email);
+            console.log('Name (from headers):', userInfo.fromHeaders.name);
+        } else if (userInfo.fromBody.email) {
+            console.log('User (from body):', userInfo.fromBody.email);
+            console.log('Name (from body):', userInfo.fromBody.name);
+        } else if (userInfo.fromQuery.email) {
+            console.log('User (from query):', userInfo.fromQuery.email);
+            console.log('Name (from query):', userInfo.fromQuery.name);
+        } else if (userInfo.fromCookies.email) {
+            console.log('User (from cookies):', userInfo.fromCookies.email);
+            console.log('Name (from cookies):', userInfo.fromCookies.name);
+        } else {
+            console.log('User: Anonymous (No user information found)');
+            console.log('Available user information sources:');
+            console.log('- Shopify User');
+            console.log('- Headers (X-User-Email, X-User-Name)');
+            console.log('- Request Body (email, name)');
+            console.log('- Query Parameters (email, name)');
+            console.log('- Cookies (userEmail, userName)');
+        }
+
+        console.log('IP Address:', req.ip);
+        console.log('User Agent:', req.headers['user-agent']);
         console.log('----------------------------------------\n');
 
         const createGiftCardMutation = `

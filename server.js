@@ -1,13 +1,17 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
 require('dotenv').config();
+const auth = require('./middleware/auth');
 
 const app = express();
 
 // Middleware
 app.use(cors());
 app.use(express.json());
+app.use(cookieParser());
+app.use(auth); // Add authentication middleware
 
 // Debug middleware
 app.use((req, res, next) => {
