@@ -2,16 +2,44 @@ const express = require('express');
 const router = express.Router();
 const GiftCard = require('../models/GiftCard');
 const axios = require('axios');
-// const { shopifyDomain, accessToken, apiVersion } = require('../config/shopify');
-const shopifyDomain = 'bje-paymore-test.myshopify.com';
-const accessToken = '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';
+const Shop = require('../models/Shop');
 const apiVersion = '2025-04';
 
-const makeShopifyRequest = async (query, variables) => {
+// Helper function to get store information from request and DB
+const getStoreInfo = async (req) => {
+    const storeInfo = req.body?.store || {};
+    const domain = storeInfo.domain;
+
+    if (!domain) {
+        throw new Error('Missing required store information (domain)');
+    }
+
+    // Fetch accessToken from DB
+    const shop = await Shop.findOne({ domain });
+    if (!shop) {
+        throw new Error('Shop not found for domain: ' + domain);
+    }
+
+    return {
+        domain,
+        token: shop.accessToken
+    };
+};
+
+const makeShopifyRequest = async (query, variables, req) => {
     console.log('\n=== Calling Shopify API MakeShopifyRequest ===\n');
+
+    console.log('req.shopify::: ', req.body);
+    console.log('req.body store::: ', req.body?.store);
+
     try {
+        const { domain, token } = await getStoreInfo(req);
+
+        console.log('domain::: ', domain);
+        console.log('token::: ', token);
+
         const response = await axios.post(
-            `https://${shopifyDomain}/admin/api/${apiVersion}/graphql.json`,
+            `https://${domain}/admin/api/${apiVersion}/graphql.json`,
             {
                 query,
                 variables
@@ -19,7 +47,7 @@ const makeShopifyRequest = async (query, variables) => {
             {
                 headers: {
                     'Content-Type': 'application/json',
-                    'X-Shopify-Access-Token': accessToken,
+                    'X-Shopify-Access-Token': token,
                 }
             }
         );
@@ -68,7 +96,7 @@ router.post('/create-gift-card', async (req, res) => {
             }
         `;
 
-        const shopData = await makeShopifyRequest(shopQuery);
+        const shopData = await makeShopifyRequest(shopQuery, null, req);
         
         // Get Shopify user information
         const userQuery = `
@@ -90,7 +118,7 @@ router.post('/create-gift-card', async (req, res) => {
         
         let shopifyUser = null;
         try {
-            const userData = await makeShopifyRequest(userQuery);
+            const userData = await makeShopifyRequest(userQuery, null, req);
             shopifyUser = userData.shop.owner;
         } catch (error) {
             console.log('Error fetching Shopify user:', error.message);
@@ -213,7 +241,7 @@ router.post('/create-gift-card', async (req, res) => {
             }
         };
 
-        const data = await makeShopifyRequest(createGiftCardMutation, variables);
+        const data = await makeShopifyRequest(createGiftCardMutation, variables, req);
         const giftCardData = data.giftCardCreate;
         
         if (giftCardData.userErrors?.length > 0) {
@@ -328,7 +356,7 @@ router.post('/reload/:giftCardId', async (req, res) => {
         const data = await makeShopifyRequest(reloadMutation, {
             id: giftCard.giftCardId,
             amount: amount
-        });
+        }, req);
 
         if (data.giftCardReload.userErrors?.length > 0) {
             return res.status(400).json({
@@ -370,7 +398,7 @@ router.get('/lookup/:code', async (req, res) => {
             }
         `;
 
-        const data = await makeShopifyRequest(query, { id: giftCard.giftCardId });
+        const data = await makeShopifyRequest(query, { id: giftCard.giftCardId }, req);
         
         // Update local balance
         giftCard.balance = parseFloat(data.giftCard.balance.amount);
@@ -425,7 +453,7 @@ router.post('/redeem/:giftCardId', async (req, res) => {
         const data = await makeShopifyRequest(adjustMutation, {
             id: giftCard.giftCardId,
             amount: amount
-        });
+        }, req);
 
         if (data.giftCardAdjust.userErrors?.length > 0) {
             return res.status(400).json({
@@ -470,7 +498,7 @@ router.post('/disable/:giftCardId', async (req, res) => {
             }
         `;
 
-        const data = await makeShopifyRequest(disableMutation, { id: giftCard.giftCardId });
+        const data = await makeShopifyRequest(disableMutation, { id: giftCard.giftCardId }, req);
         
         if (data.giftCardDisable.userErrors?.length > 0) {
             return res.status(400).json({
@@ -519,7 +547,7 @@ router.get('/transactions/:giftCardId', async (req, res) => {
             }
         `;
 
-        const data = await makeShopifyRequest(query, { id: giftCard.giftCardId });
+        const data = await makeShopifyRequest(query, { id: giftCard.giftCardId }, req);
         
         const transactions = data.giftCard.transactions.edges.map(edge => ({
             ...edge.node,
